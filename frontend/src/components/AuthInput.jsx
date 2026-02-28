@@ -3,32 +3,33 @@ import { useTheme } from "../theme/ThemeContext";
 export default function AuthInput({ label, icon, right, ...props }) {
   const { theme } = useTheme();
 
-  const base =
-    "flex items-center gap-2 rounded-2xl px-4 py-3 transition border outline-none";
-  const focus =
-    "focus-within:ring-2 focus-within:ring-indigo-500/30 focus-within:border-indigo-400/50";
+  const base = "flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-300 border outline-none group";
 
-  const themeBox =
-    theme === "dark"
-      ? "border-white/10 bg-white/5"
-      : "border-black/10 bg-slate-50";
+  const focus = theme === "dark"
+    ? "focus-within:border-indigo-500 focus-within:bg-slate-900/50 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]"
+    : "focus-within:border-blue-500 focus-within:bg-white focus-within:shadow-[0_0_20px_rgba(59,130,246,0.15)]";
 
-  const text =
-    theme === "dark"
-      ? "text-white placeholder:text-white/40"
-      : "text-slate-900 placeholder:text-slate-400";
+  const themeBox = theme === "dark"
+    ? "border-slate-700 bg-slate-800/50 hover:border-slate-600"
+    : "border-slate-200 bg-slate-50 hover:border-slate-300";
 
-  const iconColor = theme === "dark" ? "text-white/60" : "text-slate-500";
+  const text = theme === "dark"
+    ? "text-white placeholder:text-slate-500"
+    : "text-slate-900 placeholder:text-slate-400";
+
+  const iconColor = theme === "dark"
+    ? "text-slate-500 group-focus-within:text-indigo-400 transition-colors"
+    : "text-slate-400 group-focus-within:text-blue-500 transition-colors";
 
   return (
     <div>
-      <label className={`mb-1 block text-xs font-medium ${theme === "dark" ? "text-white/70" : "text-slate-600"}`}>
+      <label className={`mb-2 block text-sm font-bold tracking-wide ${theme === "dark" ? "text-slate-300" : "text-slate-700"}`}>
         {label}
       </label>
 
       <div className={`${base} ${themeBox} ${focus}`}>
-        <span className={iconColor}>{icon}</span>
-        <input {...props} className={`w-full bg-transparent outline-none ${text}`} />
+        {icon && <span className={`${iconColor} flex items-center justify-center`}>{icon}</span>}
+        <input {...props} className={`w-full bg-transparent outline-none font-medium text-base ${text}`} />
         {right}
       </div>
     </div>

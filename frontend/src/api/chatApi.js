@@ -2,10 +2,15 @@ import axios from "axios";
 
 const BASE = "http://127.0.0.1:8000";
 
-export async function getChatHistory(roomId) {
+export async function getChatHistory(roomId, limit = 50, cursor = null) {
   const token = localStorage.getItem("token");
 
-  const res = await fetch(`http://127.0.0.1:8000/chat/history/${roomId}`, {
+  let url = `http://127.0.0.1:8000/chat/history/${roomId}?limit=${limit}`;
+  if (cursor !== null) {
+    url += `&cursor=${cursor}`;
+  }
+
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -33,7 +38,7 @@ function authHeaders() {
 
 // ✅ backend should create/find a DM room for (me + friend_id)
 export async function getOrCreateDmRoom(friendId) {
-  const res = await fetch(`${API}/dm/rooms/${friendId}`, {
+  const res = await fetch(`${API}/chat/dm/${friendId}`, {
     method: "POST",
     headers: authHeaders(),
   });
@@ -41,4 +46,22 @@ export async function getOrCreateDmRoom(friendId) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Failed to create DM room");
   return data; // expect: { room_id: number }
+}
+
+export async function uploadFile(file) {
+  const token = localStorage.getItem("token");
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API}/chat/upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Failed to upload file");
+  return data; // expect { url: string, filename: string, type: string }
 }

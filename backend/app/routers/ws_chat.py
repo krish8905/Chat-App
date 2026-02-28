@@ -14,14 +14,17 @@ router = APIRouter(tags=["WS"])
 
 class RoomManager:
     def __init__(self):
-        self.rooms: Dict[int, List[WebSocket]] = {}
+        # room_id -> { WebSocket -> user_id }
+        self.rooms: Dict[int, Dict[WebSocket, int]] = {}
 
-    async def connect(self, room_id: int, ws: WebSocket):
-        self.rooms.setdefault(room_id, []).append(ws)
+    async def connect(self, room_id: int, ws: WebSocket, user_id: int):
+        if room_id not in self.rooms:
+            self.rooms[room_id] = {}
+        self.rooms[room_id][ws] = user_id
 
     def disconnect(self, room_id: int, ws: WebSocket):
         if room_id in self.rooms and ws in self.rooms[room_id]:
-            self.rooms[room_id].remove(ws)
+            del self.rooms[room_id][ws]
 
         # optional cleanup
         if room_id in self.rooms and len(self.rooms[room_id]) == 0:
@@ -29,13 +32,19 @@ class RoomManager:
 
     async def broadcast(self, room_id: int, message: dict):
         # send to a copy, so we can remove dead sockets safely
-        sockets = list(self.rooms.get(room_id, []))
+        ws_dict = self.rooms.get(room_id, {})
+        sockets = list(ws_dict.keys())
         for sock in sockets:
             try:
                 await sock.send_json(message)
             except Exception:
                 # if send fails, remove socket
                 self.disconnect(room_id, sock)
+
+    def get_users_in_room(self, room_id: int) -> List[int]:
+        if room_id not in self.rooms:
+            return []
+        return list(set(self.rooms[room_id].values()))
 
 
 manager = RoomManager()
@@ -80,23 +89,111 @@ async def ws_chat(ws: WebSocket, room_id: int):
             db.commit()
 
         # ✅ Track socket in memory
-        await manager.connect(room_id, ws)
+        await manager.connect(room_id, ws, user.id)
+
+        # ✅ Send current online users to the newly joined user
+        exist_users = manager.get_users_in_room(room_id)
+        for uid in exist_users:
+            if uid != user.id:
+                await ws.send_json({"type": "status", "user_id": uid, "status": "online"})
 
         # ✅ Joined message
         await manager.broadcast(
             room_id,
             {"type": "system", "text": f"🟢 {user.username} joined room {room_id}"},
         )
+        await manager.broadcast(
+            room_id,
+            {"type": "status", "user_id": user.id, "status": "online"},
+        )
 
         # ✅ Loop
         while True:
             data = await ws.receive_json()
+            
+            msg_type = data.get("type", "message")
+            
+            if msg_type in ("typing", "stop_typing"):
+                await manager.broadcast(
+                    room_id,
+                    {
+                        "type": msg_type,
+                        "user_id": user.id,
+                        "room_id": room_id
+                    }
+                )
+                continue
+            
+            if msg_type == "mark_seen":
+                msg_ids = data.get("msg_ids", [])
+                if msg_ids:
+                    db.query(Message).filter(Message.id.in_(msg_ids)).update({"status": "seen"}, synchronize_session=False)
+                    db.commit()
+                    await manager.broadcast(
+                        room_id,
+                        {
+                            "type": "message_status",
+                            "status": "seen",
+                            "msg_ids": msg_ids
+                        }
+                    )
+                continue
+
+            if msg_type == "delete_message_for_everyone":
+                msg_id = data.get("msg_id")
+                if msg_id:
+                    msg = db.query(Message).filter(Message.id == msg_id, Message.sender_id == user.id).first()
+                    if msg:
+                        db.delete(msg)
+                        db.commit()
+                        await manager.broadcast(
+                            room_id,
+                            {
+                                "type": "delete_message_for_everyone",
+                                "msg_id": msg_id
+                            }
+                        )
+                continue
+
+            if msg_type == "delete_messages_for_everyone":
+                msg_ids = data.get("msg_ids", [])
+                if msg_ids:
+                    msgs = db.query(Message).filter(Message.id.in_(msg_ids), Message.sender_id == user.id).all()
+                    if msgs:
+                        deleted_ids = [m.id for m in msgs]
+                        db.query(Message).filter(Message.id.in_(deleted_ids)).delete(synchronize_session=False)
+                        db.commit()
+                        await manager.broadcast(
+                            room_id,
+                            {
+                                "type": "delete_messages_for_everyone",
+                                "msg_ids": deleted_ids
+                            }
+                        )
+                continue
+
             text = (data.get("text") or "").strip()
             if not text:
                 continue
 
+            reply_to_id = data.get("reply_to_id")
+            reply_to_text = None
+            reply_to_sender = None
+
+            if reply_to_id:
+                reply_msg = db.query(Message).filter(Message.id == reply_to_id).first()
+                if reply_msg:
+                    reply_to_text = reply_msg.content
+                    reply_sender_user = db.query(User).filter(User.id == reply_msg.sender_id).first()
+                    if reply_sender_user:
+                        reply_to_sender = reply_sender_user.username
+
+            users_in_room = manager.get_users_in_room(room_id)
+            is_delivered = len(users_in_room) > 1
+            initial_status = "delivered" if is_delivered else "sent"
+
             # ✅ Save message
-            msg = Message(room_id=room_id, sender_id=user.id, content=text)
+            msg = Message(room_id=room_id, sender_id=user.id, content=text, status=initial_status, reply_to_id=reply_to_id)
             db.add(msg)
             db.commit()
             db.refresh(msg)
@@ -111,14 +208,20 @@ async def ws_chat(ws: WebSocket, room_id: int):
                     "sender_id": msg.sender_id,
                     "sender": user.username,
                     "text": msg.content,
+                    "status": msg.status,
+                    "reply_to_id": msg.reply_to_id,
+                    "reply_to_text": reply_to_text,
+                    "reply_to_sender": reply_to_sender,
                     "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 },
             )
 
     except WebSocketDisconnect:
         manager.disconnect(room_id, ws)
-        # optional:
-        # await manager.broadcast(room_id, {"type": "system", "text": f"🔴 {user.username} left"})
+        if user:
+            await manager.broadcast(room_id, {"type": "status", "user_id": user.id, "status": "offline"})
+            # optional system message:
+            # await manager.broadcast(room_id, {"type": "system", "text": f"🔴 {user.username} left"})
     finally:
         db.close()
 
