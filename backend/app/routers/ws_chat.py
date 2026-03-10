@@ -46,6 +46,22 @@ class RoomManager:
             return []
         return list(set(self.rooms[room_id].values()))
 
+    def get_all_online_users(self) -> List[int]:
+        users = set()
+        for ws_dict in self.rooms.values():
+            for uid in ws_dict.values():
+                users.add(uid)
+        return list(users)
+
+    async def broadcast_global(self, message: dict):
+        for room_id, ws_dict in list(self.rooms.items()):
+            sockets = list(ws_dict.keys())
+            for sock in sockets:
+                try:
+                    await sock.send_json(message)
+                except Exception:
+                    self.disconnect(room_id, sock)
+
 
 manager = RoomManager()
 
@@ -91,8 +107,8 @@ async def ws_chat(ws: WebSocket, room_id: int):
         # ✅ Track socket in memory
         await manager.connect(room_id, ws, user.id)
 
-        # ✅ Send current online users to the newly joined user
-        exist_users = manager.get_users_in_room(room_id)
+        # ✅ Send globally online users to the newly joined user
+        exist_users = manager.get_all_online_users()
         for uid in exist_users:
             if uid != user.id:
                 await ws.send_json({"type": "status", "user_id": uid, "status": "online"})
@@ -102,8 +118,7 @@ async def ws_chat(ws: WebSocket, room_id: int):
             room_id,
             {"type": "system", "text": f"🟢 {user.username} joined room {room_id}"},
         )
-        await manager.broadcast(
-            room_id,
+        await manager.broadcast_global(
             {"type": "status", "user_id": user.id, "status": "online"},
         )
 
@@ -137,6 +152,21 @@ async def ws_chat(ws: WebSocket, room_id: int):
                             "msg_ids": msg_ids
                         }
                     )
+                continue
+
+            # ✅ WebRTC Signaling
+            if msg_type in ("call_user", "offer", "answer", "ice", "end_call"):
+                # Simply relay these WebRTC signals to everyone else in the room
+                # In a 1-to-1 WebRTC call, the other person receives the offer, answer, or ice candidates
+                await manager.broadcast(
+                    room_id,
+                    {
+                        "type": msg_type,
+                        "sender_id": user.id,
+                        # Pass through whichever payload is relevant (sdp, candidate, etc)
+                        **{k: v for k, v in data.items() if k not in ("type", "sender_id")}
+                    }
+                )
                 continue
 
             if msg_type == "delete_message_for_everyone":
@@ -219,7 +249,9 @@ async def ws_chat(ws: WebSocket, room_id: int):
     except WebSocketDisconnect:
         manager.disconnect(room_id, ws)
         if user:
-            await manager.broadcast(room_id, {"type": "status", "user_id": user.id, "status": "offline"})
+            # If user is no longer in any room, broadcast offline globally
+            if user.id not in manager.get_all_online_users():
+                await manager.broadcast_global({"type": "status", "user_id": user.id, "status": "offline"})
             # optional system message:
             # await manager.broadcast(room_id, {"type": "system", "text": f"🔴 {user.username} left"})
     finally:

@@ -117,6 +117,14 @@ const CircleIcon = () => (
   </svg>
 );
 
+const PhoneIcon = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+  </svg>
+);
+
+
+
 export default function ChatRoom({ friend }) {
   const { theme } = useTheme();
   const [connected, setConnected] = useState(false);
@@ -160,6 +168,22 @@ export default function ChatRoom({ friend }) {
   const myTypingTimeoutRef = useRef(null);
   const lastTypedTimeRef = useRef(0);
 
+  // WebRTC Call States
+  const [incomingCall, setIncomingCall] = useState(null); // { sdp, isVideo }
+  const [isInCall, setIsInCall] = useState(false);
+  const [isVideoCall, setIsVideoCall] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+
+  const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const callDurationTimerRef = useRef(null);
+
   useEffect(() => {
     const handleClick = () => {
       setActiveDropdownId(null);
@@ -180,7 +204,7 @@ export default function ChatRoom({ friend }) {
 
     // Fetch my user details if we don't know our own username
     if (!myUsername) {
-      fetch("http://127.0.0.1:8000/auth/me", {
+      fetch(`http://${window.location.hostname}:8000/auth/me`, {
         headers: { Authorization: `Bearer ${token}` }
       })
         .then(r => r.json())
@@ -201,7 +225,8 @@ export default function ChatRoom({ friend }) {
       })
       .catch(e => console.error("Failed to load history", e));
 
-    const wsUrl = `ws://127.0.0.1:8000/ws/chat/${friend.room_id}?token=${token}`;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat/${friend.room_id}?token=${token}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -247,6 +272,21 @@ export default function ChatRoom({ friend }) {
         } else {
           setMessages((prev) => [...prev, data]);
         }
+
+        // WebRTC Signaling
+        if (data.type === "offer") {
+          setIncomingCall({ sdp: data.sdp, isVideo: data.isVideo });
+        } else if (data.type === "answer") {
+          if (peerConnectionRef.current) {
+            peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp)).catch(console.error);
+          }
+        } else if (data.type === "ice") {
+          if (peerConnectionRef.current && data.candidate) {
+            peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(console.error);
+          }
+        } else if (data.type === "end_call") {
+          cleanupCall();
+        }
       } catch { }
     };
 
@@ -255,6 +295,7 @@ export default function ChatRoom({ friend }) {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
       stopRecordingCleanup();
+      cleanupCall();
     };
   }, [friend, myUsername]); // Added myUsername to dependencies to re-run if it changes
 
@@ -272,6 +313,165 @@ export default function ChatRoom({ friend }) {
       recordingTimerRef.current = null;
     }
     setRecordingTime(0);
+  };
+
+  useEffect(() => {
+    if (isInCall && isVideoCall) {
+      if (localStreamRef.current && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      if (remoteStreamRef.current && remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+    }
+  }, [isInCall, isVideoCall]);
+
+  // ---- WebRTC Handlers ----
+  const setupWebRTC = async (withVideo) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+      localStreamRef.current = stream;
+
+      if (withVideo && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        if (event.track.kind === 'video') {
+          remoteStreamRef.current = event.streams[0];
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        } else if (event.track.kind === 'audio' && remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && wsRef.current) {
+          wsRef.current.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+        }
+      };
+
+      peerConnectionRef.current = pc;
+      return pc;
+    } catch (err) {
+      console.error("Media access denied or error:", err);
+      alert(withVideo ? "Camera and Microphone access are required for video calls." : "Microphone access is required for calls.");
+      return null;
+    }
+  };
+
+  const startCall = async (withVideo) => {
+    setIsVideoCall(withVideo);
+    const pc = await setupWebRTC(withVideo);
+    if (!pc) return;
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      if (wsRef.current) {
+        wsRef.current.send(JSON.stringify({ type: "call_user" }));
+        wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer, isVideo: withVideo }));
+      }
+      setIsInCall(true);
+      startCallTimer();
+    } catch (e) {
+      console.error("Start call error", e);
+    }
+  };
+
+  const acceptCall = async () => {
+    if (!incomingCall) return;
+    setIsVideoCall(incomingCall.isVideo);
+    const pc = await setupWebRTC(incomingCall.isVideo);
+    if (!pc) return;
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      if (wsRef.current) {
+        wsRef.current.send(JSON.stringify({ type: "answer", sdp: answer }));
+      }
+
+      setIncomingCall(null);
+      setIsInCall(true);
+      startCallTimer();
+    } catch (e) {
+      console.error("Accept call error", e);
+    }
+  };
+
+  const declineCall = () => {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "end_call" }));
+    }
+    setIncomingCall(null);
+  };
+
+  const endCall = () => {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "end_call" }));
+    }
+    cleanupCall();
+  };
+
+  const cleanupCall = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+    if (callDurationTimerRef.current) {
+      clearInterval(callDurationTimerRef.current);
+      callDurationTimerRef.current = null;
+    }
+    remoteStreamRef.current = null;
+    setIsInCall(false);
+    setIncomingCall(null);
+    setCallDuration(0);
+    setIsMuted(false);
+    setIsVideoOff(false);
+    setIsVideoCall(false);
+  };
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoOff(!videoTrack.enabled);
+      }
+    }
+  };
+
+  const startCallTimer = () => {
+    setCallDuration(0);
+    callDurationTimerRef.current = setInterval(() => {
+      setCallDuration((prev) => prev + 1);
+    }, 1000);
   };
 
   useEffect(() => {
@@ -727,6 +927,22 @@ export default function ChatRoom({ friend }) {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <button
+              onClick={() => startCall(false)}
+              disabled={!friendOnline || isInCall}
+              className={`p-2.5 rounded-full transition-colors ${theme === 'dark' ? 'text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-50'}`}
+              title="Audio Call"
+            >
+              <PhoneIcon />
+            </button>
+            <button
+              onClick={() => startCall(true)}
+              disabled={!friendOnline || isInCall}
+              className={`p-2.5 rounded-full transition-colors ${theme === 'dark' ? 'text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-50'}`}
+              title="Video Call"
+            >
+              <VideoIcon />
+            </button>
+            <button
               onClick={() => setSearchMode(true)}
               className={`p-2.5 rounded-full transition-colors ${theme === 'dark' ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
               title="Search Messages"
@@ -742,6 +958,60 @@ export default function ChatRoom({ friend }) {
               {statusText}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Call UI */}
+      {incomingCall && !isInCall && (
+        <div className={`p-4 border-b flex items-center justify-between z-20 shadow-sm relative ${theme === 'dark' ? 'bg-indigo-900/40 border-indigo-800 text-indigo-100' : 'bg-indigo-50 border-indigo-200 text-indigo-900'}`}>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-full ${theme === 'dark' ? 'bg-indigo-500' : 'bg-indigo-500 text-white'}`}>
+              {incomingCall.isVideo ? <VideoIcon /> : <PhoneIcon />}
+            </div>
+            <div>
+              <div className="font-bold">{friend.username} is calling...</div>
+              <div className="text-xs opacity-80">Incoming {incomingCall.isVideo ? "Video" : "Audio"} Call</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={acceptCall} className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-1.5 px-4 rounded-lg shadow-sm transition-colors text-sm">Accept</button>
+            <button onClick={declineCall} className="bg-red-500 hover:bg-red-400 text-white font-bold py-1.5 px-4 rounded-lg shadow-sm transition-colors text-sm">Decline</button>
+          </div>
+        </div>
+      )}
+
+      {isInCall && (
+        <div className={`p-4 border-b flex flex-col gap-3 z-20 shadow-sm relative max-h-[50vh] overflow-hidden ${theme === 'dark' ? 'bg-emerald-900/20 border-emerald-800 text-emerald-100' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full animate-pulse ${theme === 'dark' ? 'bg-emerald-500/50 text-emerald-300' : 'bg-emerald-500 text-white'}`}>
+                {isVideoCall ? <VideoIcon /> : <PhoneIcon />}
+              </div>
+              <div>
+                <div className="font-bold">Active Call</div>
+                <div className="text-xs tracking-wider opacity-80 font-mono">
+                  {Math.floor(callDuration / 60).toString().padStart(2, '0')}:{(callDuration % 60).toString().padStart(2, '0')}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={toggleMute} className={`text-sm py-1.5 px-4 rounded-lg font-bold shadow-sm transition-colors ${isMuted ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600'}`}>
+                {isMuted ? "Unmute" : "Mute"}
+              </button>
+              {isVideoCall && (
+                <button onClick={toggleVideo} className={`text-sm py-1.5 px-4 rounded-lg font-bold shadow-sm transition-colors ${isVideoOff ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600'}`}>
+                  {isVideoOff ? "Start Video" : "Stop Video"}
+                </button>
+              )}
+              <button onClick={endCall} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-1.5 px-4 rounded-lg shadow-sm transition-colors">End Call</button>
+            </div>
+          </div>
+          {isVideoCall && (
+            <div className="flex gap-2 w-full justify-center h-48 bg-black/10 rounded-xl p-2 relative">
+              <video autoPlay playsInline ref={remoteVideoRef} className="h-full rounded-lg object-contain bg-black" />
+              <video autoPlay playsInline muted ref={localVideoRef} className="absolute bottom-4 right-4 h-24 w-auto rounded-lg shadow-md border-2 border-slate-700 bg-black object-cover" />
+            </div>
+          )}
         </div>
       )}
 
@@ -1170,6 +1440,7 @@ export default function ChatRoom({ friend }) {
           </button>
         </div>
       </div>
+      <audio ref={remoteAudioRef} autoPlay style={{ display: "none" }} />
     </div>
   );
 }

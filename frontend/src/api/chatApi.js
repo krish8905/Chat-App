@@ -1,11 +1,11 @@
 import axios from "axios";
 
-const BASE = "http://127.0.0.1:8000";
+const BASE = "/api";
 
 export async function getChatHistory(roomId, limit = 50, cursor = null) {
   const token = localStorage.getItem("token");
 
-  let url = `http://127.0.0.1:8000/chat/history/${roomId}?limit=${limit}`;
+  let url = `/api/chat/history/${roomId}?limit=${limit}`;
   if (cursor !== null) {
     url += `&cursor=${cursor}`;
   }
@@ -26,7 +26,7 @@ export async function getChatHistory(roomId, limit = 50, cursor = null) {
 
 
 // src/api/chatApi.js
-const API = "http://127.0.0.1:8000";
+const API = "/api";
 
 function authHeaders() {
   const token = localStorage.getItem("token");

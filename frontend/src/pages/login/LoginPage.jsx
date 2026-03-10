@@ -28,7 +28,7 @@ export default function LoginPage() {
 
       // Fetch the username immediately following login to store for ChatRoom comparisons
       try {
-        const meRes = await fetch("http://127.0.0.1:8000/auth/me", {
+        const meRes = await fetch(`http://${window.location.hostname}:8000/auth/me`, {
           headers: { Authorization: `Bearer ${data.access_token}` },
         });
         const user = await meRes.json();

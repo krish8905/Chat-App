@@ -15,6 +15,7 @@ export default function ChatHome() {
   const location = useLocation();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(false); // Added loading state back
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -23,6 +24,31 @@ export default function ChatHome() {
       return;
     }
     loadFriends();
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat/0?token=${token}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "status") {
+          setOnlineUsers((prev) => {
+            const next = new Set(prev);
+            if (data.status === "online") next.add(data.user_id);
+            else next.delete(data.user_id);
+            return next;
+          });
+        }
+      } catch (e) {
+        console.error("Parse error", e);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array to run once on mount
 
   useEffect(() => {
@@ -155,8 +181,13 @@ export default function ChatHome() {
                   : theme === "dark" ? "hover:bg-slate-800/50 text-slate-300 border border-transparent" : "hover:bg-slate-50 text-slate-600 border border-transparent"
                   }`}
               >
-                <div className={`h-11 w-11 shrink-0 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${isSelected ? 'bg-gradient-to-br from-indigo-500 to-blue-500' : theme === 'dark' ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200 text-slate-600'}`}>
-                  {(f.username?.[0] || "U").toUpperCase()}
+                <div className="relative">
+                  <div className={`h-11 w-11 shrink-0 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${isSelected ? 'bg-gradient-to-br from-indigo-500 to-blue-500' : theme === 'dark' ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200 text-slate-600'}`}>
+                    {(f.username?.[0] || "U").toUpperCase()}
+                  </div>
+                  {onlineUsers.has(f.id) && (
+                    <span className={`absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 ${theme === 'dark' ? 'border-slate-900' : 'border-white'}`}></span>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className={`font-semibold text-[15px] truncate ${isSelected ? (theme === 'dark' ? 'text-indigo-400' : 'text-blue-600') : ''}`}>

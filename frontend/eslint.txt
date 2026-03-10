@@ -1,0 +1,13 @@
+﻿
+C:\Users\HP\Desktop\Chat_app\frontend\src\pages\chat\ChatHome.jsx
+  26:6  warning  React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\HP\Desktop\Chat_app\frontend\src\pages\chat\ChatRoom.jsx
+   250:15  error    Empty block statement                                                                                                  no-empty
+   298:6   warning  React Hook useEffect has a missing dependency: 'currentSearchIndex'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   390:38  error    'type' is defined but never used                                                                                       no-unused-vars
+  1043:20  warning  Unused eslint-disable directive (no problems were reported)
+
+Γ£û 5 problems (2 errors, 3 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

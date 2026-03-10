@@ -1,0 +1,14 @@
+﻿0d32bb9 HEAD@{0}: Branch: renamed refs/heads/main to refs/heads/main
+0d32bb9 HEAD@{2}: commit: Replacing old project with new code
+8bbfdff HEAD@{3}: pull: Fast-forward
+acae796 HEAD@{4}: checkout: moving from dev to main
+71b625e HEAD@{5}: checkout: moving from main to dev
+acae796 HEAD@{6}: checkout: moving from dev to main
+71b625e HEAD@{7}: commit: Add apiClient and ClickSpark
+acae796 HEAD@{8}: checkout: moving from main to dev
+acae796 HEAD@{9}: checkout: moving from dev to main
+acae796 HEAD@{10}: checkout: moving from main to dev
+acae796 HEAD@{11}: reset: moving to HEAD
+acae796 HEAD@{12}: pull origin main --allow-unrelated-histories: Merge made by the 'ort' strategy.
+19760bf HEAD@{13}: Branch: renamed refs/heads/master to refs/heads/main
+19760bf HEAD@{15}: commit (initial): Initial commit - Chat app working version

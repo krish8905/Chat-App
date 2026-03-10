@@ -7,8 +7,21 @@ from app.core.security import get_current_user
 import uuid
 import os
 import shutil
+import cloudinary
+import cloudinary.uploader
+from dotenv import load_dotenv
+
 from app.models.user import User
 from app.models.chat import ChatRoom, DmRoom, Message
+
+load_dotenv()
+
+cloudinary.config(
+  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+  api_key = os.getenv('CLOUDINARY_API_KEY'),
+  api_secret = os.getenv('CLOUDINARY_API_SECRET'),
+  secure = True
+)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -21,21 +34,20 @@ async def upload_file(
     me: User = Depends(get_current_user),
 ):
     try:
-        # Generate a unique filename
-        ext = os.path.splitext(file.filename)[1] if file.filename else ""
-        filename = f"{uuid.uuid4()}{ext}"
-        filepath = os.path.join("uploads", filename)
+        # Upload the file to Cloudinary
+        # resource_type="auto" automatically detects if it's an image, video, or raw file (document)
+        response = cloudinary.uploader.upload(file.file, resource_type="auto")
         
-        # Save the file
-        with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
+        # Get the secure public URL
+        file_url = response.get("secure_url")
+        
         return {
-            "url": f"http://127.0.0.1:8000/uploads/{filename}",
+            "url": file_url,
             "filename": file.filename,
             "type": file.content_type
         }
     except Exception as e:
+        print(f"Cloudinary upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/dm/{friend_id}")

@@ -22,7 +22,8 @@ export default function ChatPage() {
       return;
     }
 
-    const wsUrl = `ws://127.0.0.1:8000/ws/chat/${roomId}?token=${token}`;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat/${roomId}?token=${token}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

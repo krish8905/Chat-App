@@ -1,0 +1,6 @@
+﻿
+C:\Users\HP\Desktop\Chat_app\frontend\src\pages\chat\ChatRoom.jsx
+  1117:19  error  Parsing error: Unexpected token `}`. Did you mean `&rbrace;` or `{"}"}`?
+
+Γ£û 1 problem (1 error, 0 warnings)
+

@@ -1,0 +1,20 @@
+931:                           e.stopPropagation();
+932:                           setReplyingTo({ id: m.id, text: m.text, sender: m.sender || myUsername });
+933:                           setActiveDropdownId(null);
+934:                         }}
+935:                         className={`w-full text-left px-4 py-2.5 text-[13px] font-bold transition-colors ${theme === "dark" ? "hover:bg-slate-700" : "hover:bg-slate-50"}`}
+936:                       >
+937:                         Reply
+938:                       </button>
+939:                       <button
+940:                         onClick={(e) => handleCopy(e, m.id, m.text)}
+941:                         className={`w-full text-left px-4 py-2.5 text-[13px] font-bold transition-colors ${theme === "dark"
+942:                           ? copiedMessageId === m.id ? "bg-emerald-500/10 text-emerald-400" : "hover:bg-slate-700"
+943:                           : copiedMessageId === m.id ? "bg-emerald-50 text-emerald-600" : "hover:bg-slate-50"
+944:                           }`}
+945:                       >
+946:                         {copiedMessageId === m.id ? "Copied! ✓" : "Copy"}
+947:                       </button>
+948:                       {isMe && (
+949:                         <button
+950:                           onClick={(e) => {
